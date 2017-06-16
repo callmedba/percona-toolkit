@@ -10815,13 +10815,13 @@ sub create_triggers {
                       . "   AND ACTION_TIMING = ? "
                       . "   AND TRIGGER_SCHEMA = ? "
                       . "   AND EVENT_OBJECT_TABLE = ?";
-      $orig_after_delete_trigger = $dbh->selectrow_arrayref($trigger_sql, 'DELETE', 'AFTER', $orig_tbl->{db}, $orig_tbl->{tbl});
-      $orig_after_insert_trigger = $dbh->selectrow_arrayref($trigger_sql, 'INSERT', 'AFTER', $orig_tbl->{db}, $orig_tbl->{tbl});
-      $orig_after_update_trigger = $dbh->selectrow_arrayref($trigger_sql, 'UPDATE', 'AFTER', $orig_tbl->{db}, $orig_tbl->{tbl});
+      $orig_after_delete_trigger = $dbh->selectrow_arrayref($trigger_sql, undef, 'DELETE', 'AFTER', $orig_tbl->{db}, $orig_tbl->{tbl});
+      $orig_after_insert_trigger = $dbh->selectrow_arrayref($trigger_sql, undef, 'INSERT', 'AFTER', $orig_tbl->{db}, $orig_tbl->{tbl});
+      $orig_after_update_trigger = $dbh->selectrow_arrayref($trigger_sql, undef, 'UPDATE', 'AFTER', $orig_tbl->{db}, $orig_tbl->{tbl});
       
-      $orig_before_delete_trigger = $dbh->selectrow_arrayref($trigger_sql, 'DELETE', 'BEFORE', $orig_tbl->{db}, $orig_tbl->{tbl});
-      $orig_before_insert_trigger = $dbh->selectrow_arrayref($trigger_sql, 'INSERT', 'BEFORE', $orig_tbl->{db}, $orig_tbl->{tbl});
-      $orig_before_update_trigger = $dbh->selectrow_arrayref($trigger_sql, 'UPDATE', 'BEFORE', $orig_tbl->{db}, $orig_tbl->{tbl});
+      $orig_before_delete_trigger = $dbh->selectrow_arrayref($trigger_sql, undef, 'DELETE', 'BEFORE', $orig_tbl->{db}, $orig_tbl->{tbl});
+      $orig_before_insert_trigger = $dbh->selectrow_arrayref($trigger_sql, undef, 'INSERT', 'BEFORE', $orig_tbl->{db}, $orig_tbl->{tbl});
+      $orig_before_update_trigger = $dbh->selectrow_arrayref($trigger_sql, undef, 'UPDATE', 'BEFORE', $orig_tbl->{db}, $orig_tbl->{tbl});
    }
    # Should before triggers to run something?
    # my $bdta = "DELETE IGNORE FROM $new_tbl->{name} WHERE $del_index_cols"; # Before Delete Trigger Action
@@ -10844,18 +10844,22 @@ sub create_triggers {
    my @new_orig_triggers=[];
 
    my $orig_triggers = [
-      { suffix => 'del', event => 'DELETE', time => 'AFTER', orig_values => {}, action => $adta },
-      { suffix => 'ins', event => 'INSERT', time => 'AFTER', orig_values => {}, action => $aita },
-      { suffix => 'upd', event => 'UPDATE', time => 'AFTER', orig_values => {}, action => $auta },
+      { suffix => 'del', event => 'DELETE', time => 'AFTER', orig_values => $orig_after_delete_trigger, action => $adta },
+      { suffix => 'ins', event => 'INSERT', time => 'AFTER', orig_values => $orig_after_insert_trigger, action => $aita },
+      { suffix => 'upd', event => 'UPDATE', time => 'AFTER', orig_values => $orig_after_update_trigger, action => $auta },
 
-      { suffix => 'delb', event => 'DELETE', time => 'BEFORE', orig_values => {}, action => undef },
-      { suffix => 'insb', event => 'INSERT', time => 'BEFORE', orig_values => {}, action => undef },
-      { suffix => 'updb', event => 'UPDATE', time => 'BEFORE', orig_values => {}, action => undef },
+      { suffix => 'delb', event => 'DELETE', time => 'BEFORE', orig_values => $orig_before_delete_trigger, action => undef },
+      { suffix => 'insb', event => 'INSERT', time => 'BEFORE', orig_values => $orig_before_insert_trigger, action => undef },
+      { suffix => 'updb', event => 'UPDATE', time => 'BEFORE', orig_values => $orig_before_update_trigger, action => undef },
    ];
 
 
    for my $trigger (@$orig_triggers) {
        my $new_trigger;
+       warn "====================================================================================================";
+       warn Data::Dumper::Dumper($trigger);
+       warn "====================================================================================================";
+
        if ( $o->get('preserve-triggers') && %{$trigger->{orig_values}}) {
           # find if trigger has begin/end - supply insertion point
           my $trigger_ins_point = trigger_ins_point(trigger => $trigger->{orig_values}->{action_statement});
@@ -11087,6 +11091,11 @@ sub create_triggers {
    foreach my $trg ( @triggers ) {
       my ($name, $sql) = @$trg;
       print $sql, "\n" if $o->get('print');
+      warn "====================================================================================================";
+      warn $sql;
+      warn "prefix: ".Data::Dumper::Dumper($prefix);
+      warn "name: ".($name||'');
+      warn "====================================================================================================";
       if ( $o->get('execute') ) {
          osc_retry(
             Cxn     => $cxn,
@@ -11107,6 +11116,7 @@ sub create_triggers {
          "DROP TRIGGER IF EXISTS "
          . $q->quote($orig_tbl->{db}, "${prefix}_$name") . ";";
    }
+
 
    if ( $o->get('execute') ) {
       print ts("Created triggers OK.\n");
