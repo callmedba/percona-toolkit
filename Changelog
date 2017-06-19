@@ -2,6 +2,8 @@ Changelog for Percona Toolkit
 
 v3.0.4
 
+ * Fixed bug PT-162 : Updated pt-table-checksum ignored dbs (Thanks Agustin Gallego)
+ * Fixed bug PT-161 : Safely check for undefined values in --skip-check-slave-lag (Thanks Chris Swingler)
  * Fixed bug PT-148 : pt-osc Use of uninitialized value in printf
  * Fixed bug PT-144 : Constraint name is too long (> 64 chars)
  * Fixed bug PT-143 : pt-archiver SELECT query fails because of primary key
