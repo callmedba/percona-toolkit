@@ -8108,6 +8108,7 @@ use warnings FATAL => 'all';
 use English qw(-no_match_vars);
 
 use Percona::Toolkit;
+use SqlModes;
 use constant PTDEBUG => $ENV{PTDEBUG} || 0;
 
 use List::Util qw(max);
@@ -10807,6 +10808,8 @@ sub create_triggers {
       $cxn->connect();
 
       my $dbh = $cxn->dbh();
+      my $sqlm = new SqlModes($dbh);
+      my $original_sql_modes = $sqlm->get_modes_string();
 
       my $trigger_sql = "SELECT TRIGGER_SCHEMA, TRIGGER_NAME, DEFINER, ACTION_STATEMENT, SQL_MODE, "
                       . "       CHARACTER_SET_CLIENT, COLLATION_CONNECTION "
@@ -10836,26 +10839,27 @@ sub create_triggers {
           "OLD.$old_qcol <=> NEW.$new_qcol"
    } @{$tbl_struct->{keys}->{$del_index}->{cols}} );
 
-   my $adta = "DELETE IGNORE FROM $new_tbl->{name} WHERE $del_index_cols;"; # After Delete Trigger Action
-   my $aita = "REPLACE INTO $new_tbl->{name} ($qcols) VALUES ($new_vals);"; # After Insert Trigger Action
-   my $auta = "REPLACE INTO $new_tbl->{name} ($qcols) VALUES ($new_vals);";
+   my $adta = "DELETE IGNORE FROM $new_tbl->{name} WHERE $del_index_cols"; # After Delete Trigger Action
+   my $aita = "REPLACE INTO $new_tbl->{name} ($qcols) VALUES ($new_vals)"; # After Insert Trigger Action
+   my $auta = "REPLACE INTO $new_tbl->{name} ($qcols) VALUES ($new_vals)";
 
    my @new_triggers;
    my @new_orig_triggers=[];
 
    my $orig_triggers = [
-      { suffix => 'del', event => 'DELETE', time => 'AFTER', orig_values => $orig_after_delete_trigger || {}, action => $adta },
-      { suffix => 'ins', event => 'INSERT', time => 'AFTER', orig_values => $orig_after_insert_trigger || {}, action => $aita },
-      { suffix => 'upd', event => 'UPDATE', time => 'AFTER', orig_values => $orig_after_update_trigger || {}, action => $auta },
+      { suffix => 'del', event => 'DELETE', time => 'AFTER', orig_values => $orig_after_delete_trigger || {}, action => $adta, enabled => 1 },
+      { suffix => 'upd', event => 'UPDATE', time => 'AFTER', orig_values => $orig_after_update_trigger || {}, action => $auta, enabled => 1 },
+      { suffix => 'ins', event => 'INSERT', time => 'AFTER', orig_values => $orig_after_insert_trigger || {}, action => $aita, enabled => 1 },
 
-      { suffix => 'delb', event => 'DELETE', time => 'BEFORE', orig_values => $orig_before_delete_trigger || {}, action => '' },
-      { suffix => 'insb', event => 'INSERT', time => 'BEFORE', orig_values => $orig_before_insert_trigger || {}, action => '' },
-      { suffix => 'updb', event => 'UPDATE', time => 'BEFORE', orig_values => $orig_before_update_trigger || {}, action => '' },
+      { suffix => 'delb', event => 'DELETE', time => 'BEFORE', orig_values => $orig_before_delete_trigger || {}, action => '', enabled => 0 },
+      { suffix => 'updb', event => 'UPDATE', time => 'BEFORE', orig_values => $orig_before_update_trigger || {}, action => '', enabled => 0 },
+      { suffix => 'insb', event => 'INSERT', time => 'BEFORE', orig_values => $orig_before_insert_trigger || {}, action => '', enabled => 0 },
    ];
 
 
    for my $trigger (@$orig_triggers) {
        my $new_trigger;
+       next if !$trigger->{enabled};
 
        if ( $o->get('preserve-triggers') && %{$trigger->{orig_values}}) {
           # find if trigger has begin/end - supply insertion point
@@ -10864,15 +10868,17 @@ sub create_triggers {
           my $create_cmd = "CREATE TRIGGER `${prefix}_$trigger->{suffix}` "
                          . "$trigger->{time} $trigger->{event} ON $orig_tbl->{name} FOR EACH ROW";
           if ($trigger_ins_point) {
-
              $new_trigger 
-             = "LOCK TABLES $orig_tbl->{name} WRITE;\n"
+             = '/*!50003 SET @saved_sql_mode = @@sql_mode */ ;'
+             . "SET sql_mode = '$trigger->{orig_values}->{sql_mode}';"
+             . "LOCK TABLES $orig_tbl->{name} WRITE;\n"
              . "DROP TRIGGER IF EXISTS `$orig_tbl->{db}`.`$trigger->{orig_values}->{trigger_name}`;\n"
              . $create_cmd . "\n"
              . terminate_sql(substr($trigger->{orig_values}->{action_statement}, 0, $trigger_ins_point))."\n"
              . $trigger->{action} . ";\n"
              . "END;\n"
-             . "UNLOCK TABLES;";
+             . "UNLOCK TABLES;"
+             . '/*!50003 SET sql_mode = @saved_sql_mode */ ;';
           } else {
              $new_trigger
              = '/*!50003 SET @saved_sql_mode = @@sql_mode */ ;'
@@ -10902,8 +10908,12 @@ sub create_triggers {
           push (@new_triggers, [ $trigger->{suffix}, $new_trigger ] );
        } elsif ($trigger->{action}) {
           push (@new_triggers,
-               "CREATE TRIGGER `${prefix}_$trigger->{suffix}` $trigger->{time} $trigger->{event} "
-             . "ON $orig_tbl->{name} FOR EACH ROW $trigger->{action}"); 
+                [  
+                 $trigger->{suffix},
+                 "CREATE TRIGGER `${prefix}_$trigger->{suffix}` $trigger->{time} $trigger->{event} "
+                 . "ON $orig_tbl->{name} FOR EACH ROW $trigger->{action}"
+                ]
+               );
        }
    }
 
@@ -11085,19 +11095,8 @@ sub create_triggers {
 
    my @trigger_names;
    @drop_trigger_sqls = ();
-   warn ">>====================================================================================================";
-   warn Data::Dumper::Dumper(@new_triggers);
-   warn "--====================================================================================================";
-   warn Data::Dumper::Dumper(@triggers);
-   warn "<<====================================================================================================";
 
-   warn ">>----------------------------------------------------------------------------------------------------";
-   warn Data::Dumper::Dumper(@new_orig_triggers);
-   warn "------------------------------------------------------------------------------------------------------";
-   warn Data::Dumper::Dumper(@orig_triggers);
-   warn "<<----------------------------------------------------------------------------------------------------";
-
-   foreach my $trg ( @triggers ) {
+   foreach my $trg ( @new_triggers ) {
       my ($name, $sql) = @$trg;
       print $sql, "\n" if $o->get('print');
       if ( $o->get('execute') ) {

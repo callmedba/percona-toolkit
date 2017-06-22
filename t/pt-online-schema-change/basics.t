@@ -860,18 +860,18 @@ test_alter_table(
    ],
 );
 
-# test_alter_table(
-#    name       => "Basic --preserve-triggers before",
-#    table      => "sakila.film",
-#    pk_col     => "film_id",
-#    file       => "sakila_triggers.sql",
-#    test_type  => "add_col",
-#    new_col    => "foo",
-#    trigger_timing => 'BEFORE',
-#    cmds       => [
-#       qw(--execute --preserve-triggers --alter-foreign-keys-method rebuild_constraints), '--alter', 'ADD COLUMN foo INT',
-#    ],
-# );
+test_alter_table(
+   name       => "Basic --preserve-triggers before",
+   table      => "sakila.film",
+   pk_col     => "film_id",
+   file       => "sakila_triggers.sql",
+   test_type  => "add_col",
+   new_col    => "foo",
+   trigger_timing => 'BEFORE',
+   cmds       => [
+      qw(--execute --preserve-triggers --alter-foreign-keys-method rebuild_constraints), '--alter', 'ADD COLUMN foo INT',
+   ],
+);
 
 test_alter_table(
    name       => "--preserve-triggers --no-swap-tables",
@@ -903,6 +903,10 @@ test_alter_table(
       '--alter', 'DROP COLUMN last_update',
    ],
 );
+
+diag("Reloading sakila");
+my $master_port = $sb->port_for('master');
+system "$trunk/sandbox/load-sakila-db $master_port &";
 
 $sb->do_as_root("master", q/GRANT REPLICATION SLAVE ON *.* TO 'slave_user'@'%' IDENTIFIED BY 'slave_password'/);
 $sb->do_as_root("master", q/set sql_log_bin=0/);
