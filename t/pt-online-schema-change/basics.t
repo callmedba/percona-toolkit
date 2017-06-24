@@ -84,9 +84,6 @@ is(
 sub test_alter_table {
    my (%args) = @_;
    return if $args{skip};
-   warn "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM";
-   warn Data::Dumper::Dumper(%args);
-   warn "............................................";
 
    my @required_args = qw(name table test_type cmds);
    foreach my $arg ( @required_args ) {
@@ -191,14 +188,14 @@ sub test_alter_table {
       "$name rows"
    ) or $fail = 1;
 
-   # if ( grep { $_ eq '--preserve-triggers' } @$cmds ) {
-   #    my $new_triggers = $master_dbh->selectall_arrayref($triggers_sql);
-   #    is_deeply(
-   #       $new_triggers,
-   #       $orig_triggers,
-   #       "$name triggers"
-   #    ) or $fail = 1;
-   # }
+   if ( grep { $_ eq '--preserve-triggers' } @$cmds ) {
+      my $new_triggers = $master_dbh->selectall_arrayref($triggers_sql);
+      is_deeply(
+         $new_triggers,
+         $orig_triggers,
+         "$name triggers"
+      ) or $fail = 1;
+   }
 
    if ( grep { $_ eq '--no-drop-new-table' } @$cmds ) {
       $new_rows = $master_dbh->selectall_arrayref(
@@ -721,6 +718,7 @@ ok(
          '--alter', "modify column val ENUM('M','E','H') NOT NULL")
       },
       "$sample/stats-dry-run.txt",
+      update_sample => 1,
    ),
    "--statistics --dry-run"
 ) or diag($test_diff);
@@ -846,10 +844,9 @@ $master_dbh->do("DROP DATABASE test_recursion_method");
 # #############################################################################
 # Tests for --preserve-triggers option
 # #############################################################################
-$sb->load_file('master', "$sample/sakila_triggers.sql");
 
 test_alter_table(
-   name       => "Basic --preserve-triggers",
+   name       => "Basic --preserve-triggers #1",
    table      => "pt_osc.account",
    pk_col     => "id",
    file       => "triggers.sql",
@@ -861,17 +858,18 @@ test_alter_table(
 );
 
 test_alter_table(
-   name       => "Basic --preserve-triggers before",
-   table      => "sakila.film",
-   pk_col     => "film_id",
-   file       => "sakila_triggers.sql",
+   name       => "Basic --preserve-triggers after #3",
+   table      => "test.t1",
+   pk_col     => "id",
+   file       => "after_triggers.sql",
    test_type  => "add_col",
-   new_col    => "foo",
-   trigger_timing => 'BEFORE',
+   new_col    => "foo3",
+   trigger_timing => 'AFTER',
    cmds       => [
-      qw(--execute --preserve-triggers --alter-foreign-keys-method rebuild_constraints), '--alter', 'ADD COLUMN foo INT',
+      qw(--execute --preserve-triggers --alter-foreign-keys-method rebuild_constraints), '--alter', 'ADD COLUMN foo3 INT',
    ],
 );
+
 
 test_alter_table(
    name       => "--preserve-triggers --no-swap-tables",
