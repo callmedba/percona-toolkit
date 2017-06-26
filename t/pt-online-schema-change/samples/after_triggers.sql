@@ -30,6 +30,8 @@ CREATE TRIGGER test.after_insert
  -- for pt_osc
 ;
 
+DELIMITER //
+
 CREATE TRIGGER test.after_update
  AFTER
  -- a comment here
@@ -39,8 +41,11 @@ CREATE TRIGGER test.after_update
    BEGIN
      INSERT INTO test.log VALUES (NOW(), CONCAT("updated row row with id ", OLD.id, " old f1:", OLD.f1, " new f1: ", NEW.f1 ));
      INSERT INTO test.log VALUES (NOW(), CONCAT("updated row row with id ", OLD.id, " old f1:", OLD.f1, " new f1: ", NEW.f1 ));
+   END
  -- for pt_osc
-;
+//
+
+DELIMITER ;
 
 CREATE TRIGGER test.after_delete
  AFTER
