@@ -10815,29 +10815,6 @@ sub create_triggers {
    my ($orig_before_delete_trigger, $orig_before_insert_trigger, $orig_before_update_trigger);
    my ($orig_after_delete_trigger, $orig_after_insert_trigger, $orig_after_update_trigger);
 
-   if ( $o->get('preserve-triggers') ) {
-      $cxn->connect();
-
-      my $dbh = $cxn->dbh();
-      my $sqlm = new SqlModes($dbh);
-      my $original_sql_modes = $sqlm->get_modes_string();
-
-      my $trigger_sql = "SELECT TRIGGER_SCHEMA, TRIGGER_NAME, DEFINER, ACTION_STATEMENT, SQL_MODE, "
-                      . "       CHARACTER_SET_CLIENT, COLLATION_CONNECTION "
-                      . "  FROM INFORMATION_SCHEMA.TRIGGERS "
-                      . " WHERE EVENT_MANIPULATION = ? "
-                      . "   AND ACTION_TIMING = ? "
-                      . "   AND TRIGGER_SCHEMA = ? "
-                      . "   AND EVENT_OBJECT_TABLE = ?";
-      $orig_after_delete_trigger = $dbh->selectrow_hashref($trigger_sql, undef, 'DELETE', 'AFTER', $orig_tbl->{db}, $orig_tbl->{tbl});
-      $orig_after_insert_trigger = $dbh->selectrow_hashref($trigger_sql, undef, 'INSERT', 'AFTER', $orig_tbl->{db}, $orig_tbl->{tbl});
-      $orig_after_update_trigger = $dbh->selectrow_hashref($trigger_sql, undef, 'UPDATE', 'AFTER', $orig_tbl->{db}, $orig_tbl->{tbl});
-      
-      $orig_before_delete_trigger = $dbh->selectrow_hashref($trigger_sql, undef, 'DELETE', 'BEFORE', $orig_tbl->{db}, $orig_tbl->{tbl});
-      $orig_before_insert_trigger = $dbh->selectrow_hashref($trigger_sql, undef, 'INSERT', 'BEFORE', $orig_tbl->{db}, $orig_tbl->{tbl});
-      $orig_before_update_trigger = $dbh->selectrow_hashref($trigger_sql, undef, 'UPDATE', 'BEFORE', $orig_tbl->{db}, $orig_tbl->{tbl});
-   }
-
    my $upd_index_cols = join(" AND ", map {
           my $new_col = $_;
           my $old_col = $old_col_for{$new_col} || $new_col;
@@ -10850,21 +10827,40 @@ sub create_triggers {
    my $aita = "REPLACE INTO $new_tbl->{name} ($qcols) VALUES ($new_vals);"; # After Insert Trigger Action
    my $auta = "REPLACE INTO $new_tbl->{name} ($qcols) VALUES ($new_vals);";
 
-   my @new_triggers;
-   my @test_triggers;
+   my $triggers_info = [                                                     
+      { suffix => 'del', event => 'DELETE', time => 'AFTER', orig_triggers => [], new_trigger_action => $adta },
+      { suffix => 'upd', event => 'UPDATE', time => 'AFTER', orig_triggers => [], new_trigger_action => $auta },
+      { suffix => 'ins', event => 'INSERT', time => 'AFTER', orig_triggers => [], new_trigger_action => $aita },
 
-   my $orig_triggers_info = [
-      { suffix => 'del', event => 'DELETE', time => 'AFTER', orig_values => $orig_after_delete_trigger || {}, action => $adta },
-      { suffix => 'upd', event => 'UPDATE', time => 'AFTER', orig_values => $orig_after_update_trigger || {}, action => $auta },
-      { suffix => 'ins', event => 'INSERT', time => 'AFTER', orig_values => $orig_after_insert_trigger || {}, action => $aita },
-
-      { suffix => 'delb', event => 'DELETE', time => 'BEFORE', orig_values => $orig_before_delete_trigger || {}, action => '' },
-      { suffix => 'updb', event => 'UPDATE', time => 'BEFORE', orig_values => $orig_before_update_trigger || {}, action => '' },
-      { suffix => 'insb', event => 'INSERT', time => 'BEFORE', orig_values => $orig_before_insert_trigger || {}, action => '' },
+      { suffix => 'delb', event => 'DELETE', time => 'BEFORE', orig_triggers => [], new_trigger_action => '' },
+      { suffix => 'updb', event => 'UPDATE', time => 'BEFORE', orig_triggers => [], new_trigger_action => '' },
+      { suffix => 'insb', event => 'INSERT', time => 'BEFORE', orig_triggers => [], new_trigger_action => '' },
    ];
 
+   if ( $o->get('preserve-triggers') ) {
+      $cxn->connect();
 
-   for my $trigger (@$orig_triggers_info) {
+      my $dbh = $cxn->dbh();
+
+      my $trigger_sql = "SELECT TRIGGER_SCHEMA, TRIGGER_NAME, DEFINER, ACTION_STATEMENT, SQL_MODE, "
+                      . "       CHARACTER_SET_CLIENT, COLLATION_CONNECTION "
+                      . "  FROM INFORMATION_SCHEMA.TRIGGERS "
+                      . " WHERE EVENT_MANIPULATION = ? "
+                      . "   AND ACTION_TIMING = ? "
+                      . "   AND TRIGGER_SCHEMA = ? "
+                      . "   AND EVENT_OBJECT_TABLE = ?";
+       foreach $trigger_info (@$triggers_info) {
+           $trigger_info->{orig_triggers} = $dbh->selectall_arrayref( $trigger_sql, 
+                                                                      { Slice => {} }, 
+                                                                      $trigger_info->{event},
+                                                                      $trigger_info->{time},
+                                                                      $orig_tbl->{db}, 
+                                                                      $orig_tbl->{tbl}
+                                                                    );
+       }
+   }
+
+   for my $trigger (@$triggers_info) {
        my $new_trigger;
        my $new_trigger_array = [];
 
@@ -10894,41 +10890,12 @@ sub create_triggers {
           ];
           push @tas_new_triggers, { sufix => $trigger->{suffix}, sql => $new_trigger_array };
 
-          my $definer = $trigger->{orig_values}->{definer} || '';
-          $definer =~ s/@/`@`/;
-          $definer = "`".$definer."`";
-
-          push(@orig_triggers,
-                  "/* orig triggers */\n"
-                . "/*!50003 SET \@saved_sql_mode = \@\@sql_mode */;\n"
-                . "SET SESSION sql_mode = '$trigger->{orig_values}->{sql_mode}';\n"
-                . "CREATE DEFINER=$definer TRIGGER `$trigger->{orig_values}->{trigger_schema}`."
-                . "`$trigger->{orig_values}->{trigger_name}` "
-                . "$trigger->{time} $trigger->{event} ON $new_tbl->{name}\n"
-                . "FOR EACH ROW\n"
-                . terminate_sql($trigger->{orig_values}->{action_statement}) . "\n",
-          );
-
-          push(@test_triggers,
-              [ 
-                "`$trigger->{orig_values}->{trigger_schema}`.`$trigger->{orig_values}->{trigger_name}_PT_OSC_TEST`" , # Trigger name
-                  "/*!50003 SET \@saved_sql_mode = \@\@sql_mode */;\n"
-                . "SET SESSION sql_mode = '$trigger->{orig_values}->{sql_mode}';\n"
-                . "CREATE DEFINER=$definer TRIGGER `$trigger->{orig_values}->{trigger_schema}`."
-                . "`$trigger->{orig_values}->{trigger_name}_PT_OSC_TEST` "
-                . "$trigger->{time} $trigger->{event} ON $new_tbl->{name}\n"
-                . "FOR EACH ROW\n"
-                . terminate_sql($trigger->{orig_values}->{action_statement}) . "\n",
-              ]
-          );
-
-          push (@new_triggers, [ $trigger->{suffix}, $new_trigger ] );
        } elsif ($trigger->{action}) {
           push (@new_triggers,
                 [  
                  $trigger->{suffix},
                  "CREATE TRIGGER `${prefix}_$trigger->{suffix}` $trigger->{time} $trigger->{event} "
-                 . "ON $orig_tbl->{name} FOR EACH ROW $trigger->{action}"
+                 . "ON $orig_tbl->{name} FOR EACH ROW $trigger->{new_trigger_action}"
                 ]
                );
        }
