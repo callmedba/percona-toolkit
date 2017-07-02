@@ -120,14 +120,9 @@ sub test_alter_table {
    my $orig_max_id = $master_dbh->selectall_arrayref(
       "SELECT MAX(`$pk_col`) FROM `$db`.`$tbl`");
 
-   my $trigger_timing = $args{trigger_timing} || 'AFTER';
-   my $trigger_event = $args{trigger_event} || 'DELETE';
-
    my $triggers_sql = "SELECT TRIGGER_SCHEMA, TRIGGER_NAME, DEFINER, ACTION_STATEMENT ".
                       "  FROM INFORMATION_SCHEMA.TRIGGERS ".
-                       "WHERE EVENT_MANIPULATION = '$trigger_event' ".
-                       "  AND ACTION_TIMING = '$trigger_timing' " .
-                       "  AND TRIGGER_SCHEMA = '$db' " .
+                       "WHERE TRIGGER_SCHEMA = '$db' " .
                        "  AND EVENT_OBJECT_TABLE = '$tbl'";
    my $orig_triggers = $master_dbh->selectall_arrayref($triggers_sql);
 
@@ -845,62 +840,66 @@ $master_dbh->do("DROP DATABASE test_recursion_method");
 # Tests for --preserve-triggers option
 # #############################################################################
 
-test_alter_table(
-   name       => "Basic --preserve-triggers #1",
-   table      => "pt_osc.account",
-   pk_col     => "id",
-   file       => "triggers.sql",
-   test_type  => "add_col",
-   new_col    => "foo",
-   cmds       => [
-      qw(--execute --preserve-triggers), '--alter', 'ADD COLUMN foo INT',
-   ],
-);
+SKIP: {
+   skip 'Sandbox MySQL version should be >= 5.7' unless $sandbox_version ge '5.7';
 
-test_alter_table(
-   name       => "Basic --preserve-triggers after #3",
-   table      => "test.t1",
-   pk_col     => "id",
-   file       => "after_triggers.sql",
-   test_type  => "add_col",
-   new_col    => "foo3",
-   trigger_timing => 'AFTER',
-   cmds       => [
-      qw(--execute --preserve-triggers --alter-foreign-keys-method rebuild_constraints), '--alter', 'ADD COLUMN foo3 INT',
-   ],
-);
-
-
-test_alter_table(
-   name       => "--preserve-triggers --no-swap-tables",
-   table      => "pt_osc.t",
-   file       => "basic_no_fks_innodb.sql",
-   max_id     => 20,
-   test_type  => "add_col",
-   new_col    => "foo",
-   no_change  => 1,
-   cmds       => [
-      qw(--execute --no-swap-tables --preserve-triggers), '--alter', 'ADD COLUMN foo INT'
-   ],
-);
-
-test_alter_table(
-   name        => "Basic FK auto --execute",
-   table       => "pt_osc.country",
-   pk_col      => "country_id",
-   file        => "basic_with_fks.sql",
-   test_type   => "drop_col",
-   drop_col    => "last_update",
-   check_fks   => "rebuild_constraints",
-   cmds        => [
-   qw(
-      --execute
-      --alter-foreign-keys-method rebuild_constraints
-      --preserve-triggers
-   ),
-      '--alter', 'DROP COLUMN last_update',
-   ],
-);
+    test_alter_table(
+       name       => "Basic --preserve-triggers #1",
+       table      => "pt_osc.account",
+       pk_col     => "id",
+       file       => "triggers.sql",
+       test_type  => "add_col",
+       new_col    => "foo",
+       cmds       => [
+          qw(--execute --preserve-triggers), '--alter', 'ADD COLUMN foo INT',
+       ],
+    );
+    
+    test_alter_table(
+       name       => "Basic --preserve-triggers after #3",
+       table      => "test.t1",
+       pk_col     => "id",
+       file       => "after_triggers.sql",
+       test_type  => "add_col",
+       new_col    => "foo3",
+       trigger_timing => 'AFTER',
+       cmds       => [
+          qw(--execute --preserve-triggers --alter-foreign-keys-method rebuild_constraints), '--alter', 'ADD COLUMN foo3 INT',
+       ],
+    );
+    
+    
+    test_alter_table(
+       name       => "--preserve-triggers --no-swap-tables",
+       table      => "pt_osc.t",
+       file       => "basic_no_fks_innodb.sql",
+       max_id     => 20,
+       test_type  => "add_col",
+       new_col    => "foo",
+       no_change  => 1,
+       cmds       => [
+          qw(--execute --no-swap-tables --preserve-triggers), '--alter', 'ADD COLUMN foo INT'
+       ],
+    );
+    
+    test_alter_table(
+       name        => "Basic FK auto --execute",
+       table       => "pt_osc.country",
+       pk_col      => "country_id",
+       file        => "basic_with_fks.sql",
+       test_type   => "drop_col",
+       drop_col    => "last_update",
+       check_fks   => "rebuild_constraints",
+       cmds        => [
+       qw(
+          --execute
+          --alter-foreign-keys-method rebuild_constraints
+          --preserve-triggers
+       ),
+          '--alter', 'DROP COLUMN last_update',
+       ],
+    );
+}
 
 diag("Reloading sakila");
 my $master_port = $sb->port_for('master');

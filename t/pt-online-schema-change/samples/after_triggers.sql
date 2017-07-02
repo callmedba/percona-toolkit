@@ -30,6 +30,15 @@ CREATE TRIGGER test.after_insert
  -- for pt_osc
 ;
 
+CREATE TRIGGER test.after_insert2
+ AFTER
+ -- a comment here
+   INSERT ON test.t1
+ -- just to make things harder
+   FOR EACH ROW INSERT INTO test.log VALUES (NOW(), CONCAT("inserted duplicate of new row with id: ", NEW.id))
+ -- for pt_osc
+;
+
 DELIMITER //
 
 CREATE TRIGGER test.after_update
